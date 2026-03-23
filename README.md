@@ -1,3 +1,7 @@
+# 个人博客系统
+
+基于 Cloudflare Workers + D1 + Vue 3 构建的简约个人博客系统。
+
 # 我自己布置好的网址：
 https://782130.xyz/
 
