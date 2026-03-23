@@ -45,9 +45,13 @@ async function handleLogin() {
   loading.value = true
   try {
     const res = await axios.post('/api/auth/login', form)
-    localStorage.setItem('token', res.data.token)
-    ElMessage.success('登录成功')
-    router.push('/admin')
+    if (res.data && res.data.token) {
+      localStorage.setItem('token', res.data.token)
+      ElMessage.success('登录成功')
+      router.push('/admin')
+    } else {
+      ElMessage.error('登录失败：服务器未返回有效token')
+    }
   } catch (e) {
     ElMessage.error(e.response?.data?.error || '登录失败')
   } finally {

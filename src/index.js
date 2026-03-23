@@ -204,16 +204,17 @@ async function getTags(env) {
 async function login(request, env) {
   const { username, password } = await request.json()
 
+  const passwordHash = await sha256(password)
+
   const user = await env.DB.prepare(
     'SELECT id, username, password, role FROM users WHERE username = ?'
   ).bind(username).first()
 
-  if (!user || user.password !== password) {
+  if (!user || user.password !== passwordHash) {
     return Response.json({ error: '用户名或密码错误' }, { status: 401 })
   }
 
-  // 简单 token（生产环境应使用 JWT）
-  const token = btoa(JSON.stringify({ userId: user.id, exp: Date.now() + 86400000 }))
+  const token = await generateToken(user.id, env)
 
   return Response.json({ token, user: { id: user.id, username: user.username, role: user.role } })
 }
@@ -225,14 +226,69 @@ async function verifyAuth(request, env) {
 
   try {
     const token = auth.slice(7)
-    const data = JSON.parse(atob(token))
-    if (data.exp < Date.now()) return null
+    const payload = await verifyToken(token, env)
+    if (!payload) return null
 
-    const user = await env.DB.prepare('SELECT id, username, role FROM users WHERE id = ?').bind(data.userId).first()
+    const user = await env.DB.prepare('SELECT id, username, role FROM users WHERE id = ?').bind(payload.userId).first()
     return user
   } catch {
     return null
   }
+}
+
+// ========== 安全工具函数 ==========
+
+async function sha256(text) {
+  const encoder = new TextEncoder()
+  const data = encoder.encode(text)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data)
+  const hashArray = Array.from(new Uint8Array(hashBuffer))
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+async function getSecretKey(env) {
+  const secret = env.JWT_SECRET || 'your-super-secret-key-change-in-production'
+  const encoder = new TextEncoder()
+  return await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign', 'verify']
+  )
+}
+
+async function generateToken(userId, env) {
+  const exp = Date.now() + 86400000
+  const payload = `${userId}.${exp}`
+  const key = await getSecretKey(env)
+  const encoder = new TextEncoder()
+  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(payload))
+  const sigHex = Array.from(new Uint8Array(signature)).map(b => b.toString(16).padStart(2, '0')).join('')
+  return `${payload}.${sigHex}`
+}
+
+async function verifyToken(token, env) {
+  const parts = token.split('.')
+  if (parts.length !== 3) return null
+
+  const [userIdStr, expStr, sigHex] = parts
+  const payload = `${userIdStr}.${expStr}`
+  const exp = parseInt(expStr)
+
+  if (isNaN(exp) || exp < Date.now()) return null
+
+  const key = await getSecretKey(env)
+  const encoder = new TextEncoder()
+  const sigBytes = new Uint8Array(sigHex.match(/.{2}/g).map(b => parseInt(b, 16)))
+
+  const isValid = await crypto.subtle.verify('HMAC', key, sigBytes, encoder.encode(payload))
+  if (!isValid) return null
+
+  const userId = parseInt(userIdStr)
+  if (isNaN(userId)) return null
+
+  return { userId, exp }
 }
 
 // 获取所有文章（管理后台）- 支持搜索和分页

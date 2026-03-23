@@ -10,3 +10,6 @@ binding = "ASSETS"
 binding = "DB"
 database_name = "blog"
 database_id = "your-database-id-here"
+
+[vars]
+JWT_SECRET = "your-super-secret-key-at-least-32-chars-long"
